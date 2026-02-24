@@ -1,0 +1,5 @@
+{
+  "name": "PokeChess",
+  "description": "A chess game featuring Pokémon sprites as pieces.",
+  "requestFramePermissions": []
+}
