@@ -275,7 +275,7 @@ async function startServer() {
 
   app.get("/api/rooms", (req, res) => {
     const activeRooms = Array.from(games.entries())
-      .filter(([id, g]) => !id.startsWith("ai") && g.players.w && g.players.b)
+      .filter(([id, g]) => !id.startsWith("ai") && (g.players.w || g.players.b))
       .map(([id, _]) => id);
     res.json({ rooms: activeRooms });
   });

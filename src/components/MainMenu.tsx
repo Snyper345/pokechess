@@ -13,9 +13,14 @@ export function MainMenu({ onJoin, className }: MainMenuProps) {
     const [leaderboard, setLeaderboard] = useState<{ username: string, elo: number }[]>([]);
 
     useEffect(() => {
-        // Fetch leaderboard & rooms (Will be handled by backend, failing gracefully for now)
-        fetch("/api/rooms").then(r => r.json()).then(data => setActiveRooms(data.rooms || [])).catch(() => { });
-        fetch("/api/leaderboard").then(r => r.json()).then(data => setLeaderboard(data.leaderboard || [])).catch(() => { });
+        const fetchData = () => {
+            fetch("/api/rooms").then(r => r.json()).then(data => setActiveRooms(data.rooms || [])).catch(() => { });
+            fetch("/api/leaderboard").then(r => r.json()).then(data => setLeaderboard(data.leaderboard || [])).catch(() => { });
+        };
+
+        fetchData();
+        const interval = setInterval(fetchData, 5000); // Peer-refresh every 5s
+        return () => clearInterval(interval);
     }, []);
 
     const handleJoin = (targetRoom: string) => {
