@@ -13,7 +13,7 @@ import { PromotionModal } from "./PromotionModal";
 import { MainMenu } from "./MainMenu";
 import { Chat } from "./Chat";
 import { MiniMap } from "./MiniMap"; // Added MiniMap import
-import { useSettingsStore } from "@/lib/store";
+import { useSettingsStore, useCharacterStore, TRAINER_SPRITES, type CharacterData } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "motion/react";
 import { EffectComposer, Bloom, DepthOfField, Vignette, Noise, SSAO, ToneMapping } from "@react-three/postprocessing";
@@ -23,14 +23,40 @@ import { shakeEvent } from "@/lib/events";
 import { Mesh } from "three";
 import { playMoveSound, playCaptureSound, playCheckSound, playPokemonCry, toggleBattleMusic, setBgmIntensity } from "@/lib/audio";
 import { POKEMON_MAP } from "./Piece3D";
-function CinematicCamera() {
+import { generateNoiseTexture } from "@/lib/textures";
+
+// Pre-generate textures for the board
+const BOARD_NOISE = generateNoiseTexture(256, 1.0, 0.4);
+if (BOARD_NOISE) {
+  BOARD_NOISE.repeat.set(2, 2);
+}
+
+function CinematicCamera({ enableParallax }: { enableParallax: boolean }) {
+  const offset = useRef({ x: 0, y: 0 });
+
   useFrame((state) => {
+    if (!enableParallax) return;
+
     const t = state.clock.elapsedTime;
-    // Subtle procedural sway
-    state.camera.position.x += Math.sin(t * 0.5) * 0.005;
-    state.camera.position.y += Math.cos(t * 0.4) * 0.005;
-    state.camera.position.z += Math.sin(t * 0.3) * 0.005;
-    state.camera.lookAt(0, 0, 0); // Keep focus on the board center roughly
+    const delta = state.clock.getDelta();
+
+    // Very subtle idle breathing sway — affects only a tiny position offset
+    // This does NOT override the camera's actual position set by OrbitControls
+    const swayX = Math.sin(t * 0.3) * 0.02;
+    const swayY = Math.cos(t * 0.25) * 0.01;
+
+    // Mouse parallax — gentle
+    const mouseX = state.pointer.x * 0.15;
+    const mouseY = state.pointer.y * 0.08;
+
+    // Smoothly interpolate the offset
+    offset.current.x = THREE.MathUtils.damp(offset.current.x, swayX + mouseX, 3, delta);
+    offset.current.y = THREE.MathUtils.damp(offset.current.y, swayY + mouseY, 3, delta);
+
+    // Apply as a tiny additive offset — don't override the base position
+    // OrbitControls manages the actual camera position; we just nudge it slightly
+    state.camera.position.x += offset.current.x * 0.05;
+    state.camera.position.y += offset.current.y * 0.05;
   });
   return null;
 }
@@ -110,11 +136,16 @@ function Square3D({
         <meshStandardMaterial
           color={
             isSelected
-              ? "#fbbf24" // Amber-400
+              ? useSettingsStore.getState().highlightColor // Dynamic color
               : isBlack
                 ? "#065f46" // Emerald-800
                 : "#ecfdf5" // Emerald-50
           }
+          roughnessMap={BOARD_NOISE}
+          roughness={isBlack ? 0.3 : 0.15}
+          metalness={isBlack ? 0.2 : 0.05}
+          bumpMap={BOARD_NOISE}
+          bumpScale={0.002}
         />
       </mesh>
 
@@ -165,9 +196,17 @@ export function ChessBoard({ className }: ChessBoardProps) {
   const [trashTalk, setTrashTalk] = useState<string | null>(null);
   const [surrenderWinner, setSurrenderWinner] = useState<"w" | "b" | null>(null);
   const [messages, setMessages] = useState<{ sender: string, text: string, isSystem?: boolean }[]>([]);
+  const [opponentCharacter, setOpponentCharacter] = useState<CharacterData | null>(null);
+  const [opponentUsername, setOpponentUsername] = useState<string | null>(null);
 
-  // Settings
-  const { enableParallax, quality, enableScreenShake, enableHints } = useSettingsStore();
+  const store = useSettingsStore();
+  const characterStore = useCharacterStore();
+
+  const {
+    enableParallax, resolutionScale, shadowQuality, enableBloom, enableSSAO, enableAA,
+    enableScreenShake, enableHints, showCoordinates, highlightColor,
+    cameraSensitivity, autoRotateCamera
+  } = store;
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -194,10 +233,22 @@ export function ChessBoard({ className }: ChessBoardProps) {
     }
   }, [game, enableHints]);
 
+  // We wait for the user to interact with the screen before trying to start audio.
+  // This bypasses Chrome/Safari's strict autoplay restrictions.
   useEffect(() => {
-    // Initial music state check based on settings
-    const { enableMusic } = useSettingsStore.getState();
-    toggleBattleMusic(enableMusic);
+    const handleFirstInteraction = () => {
+      toggleBattleMusic(true);
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
+    };
+
+    window.addEventListener('click', handleFirstInteraction);
+    window.addEventListener('keydown', handleFirstInteraction);
+
+    return () => {
+      window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('keydown', handleFirstInteraction);
+    }
   }, []);
 
   const updateCapturedPieces = () => {
@@ -221,7 +272,12 @@ export function ChessBoard({ className }: ChessBoardProps) {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "JOIN_ROOM", roomId: targetRoomId, username: uname }));
+      ws.send(JSON.stringify({
+        type: "JOIN_ROOM",
+        roomId: targetRoomId,
+        username: uname,
+        character: characterStore.getCharacterData(),
+      }));
     };
 
     ws.onmessage = (event) => {
@@ -233,6 +289,10 @@ export function ChessBoard({ className }: ChessBoardProps) {
         setPlayerColor(data.color);
         setJoined(true);
         setMessages([{ sender: "System", text: `Connected to ${targetRoomId}`, isSystem: true }]);
+        if (data.opponentCharacter) {
+          setOpponentCharacter(data.opponentCharacter);
+          setOpponentUsername(data.opponentUsername || null);
+        }
       }
 
       if (data.type === "UPDATE_GAME") {
@@ -269,6 +329,11 @@ export function ChessBoard({ className }: ChessBoardProps) {
 
       if (data.type === "SYSTEM_MESSAGE") {
         setMessages(prev => [...prev, { sender: "System", text: data.text, isSystem: true }]);
+      }
+
+      if (data.type === "OPPONENT_CHARACTER") {
+        setOpponentCharacter(data.character);
+        setOpponentUsername(data.username || null);
       }
 
       if (data.type === "ERROR") {
@@ -391,10 +456,11 @@ export function ChessBoard({ className }: ChessBoardProps) {
           <SettingsPanel />
           <BattleOverlay />
           <Canvas
-            shadows={{ type: quality === 'high' ? THREE.PCFShadowMap : quality === 'medium' ? THREE.PCFShadowMap : THREE.BasicShadowMap }}
-            dpr={quality === 'high' ? [1, 2] : quality === 'medium' ? [1, 1.5] : [1, 1]}
+            frameloop={store.fpsCap > 0 ? "demand" : "always"}
+            shadows={shadowQuality !== 'off'}
+            dpr={resolutionScale}
             camera={{ position: playerColor === 'b' ? [0, 8, -8] : [0, 8, 8], fov: 45 }}
-            gl={{ antialias: false, toneMapping: THREE.ACESFilmicToneMapping, outputColorSpace: THREE.SRGBColorSpace }}
+            gl={{ antialias: enableAA, toneMapping: THREE.ACESFilmicToneMapping, outputColorSpace: THREE.SRGBColorSpace }}
           >
             <Suspense fallback={<Loader />}>
               {/* Subtle directional fill lights for atmospheric depth and rim lighting, avoiding flat ambient light */}
@@ -429,7 +495,29 @@ export function ChessBoard({ className }: ChessBoardProps) {
               <ContactShadows position={[0, -0.1, 0]} opacity={0.4} scale={20} blur={2} far={4.5} />
               <Environment preset="night" environmentIntensity={1.0} background={false} />
               <Stars radius={50} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
-              <Colosseum trashTalk={null} />
+
+              {/* Board Coordinates */}
+              {showCoordinates && (
+                <group position={[-3.5, 0.1, -3.5]}>
+                  {files.map((file, i) => (
+                    <Html key={`file-${i}`} position={[i, 0, 8.2]} center transform sprite zIndexRange={[100, 0]}>
+                      <div className="text-white/50 font-bold text-xs pointer-events-none select-none">{file.toUpperCase()}</div>
+                    </Html>
+                  ))}
+                  {ranks.map((rank, i) => (
+                    <Html key={`rank-${i}`} position={[-0.8, 0, i]} center transform sprite zIndexRange={[100, 0]}>
+                      <div className="text-white/50 font-bold text-xs pointer-events-none select-none">{rank}</div>
+                    </Html>
+                  ))}
+                </group>
+              )}
+
+              <Colosseum
+                trashTalk={null}
+                playerCharacter={characterStore.getCharacterData()}
+                opponentCharacter={opponentCharacter}
+                playerColor={playerColor}
+              />
 
               {trashTalk && (
                 <Html position={[0, 4, -4]} center transform>
@@ -440,27 +528,38 @@ export function ChessBoard({ className }: ChessBoardProps) {
               )}
 
               <AnimatedPiecesManager game={game} />
-              <OrbitControls makeDefault minPolarAngle={0} maxPolarAngle={Math.PI / 2.2} enableDamping dampingFactor={0.05} />
-              <CinematicCamera />
+              <OrbitControls
+                makeDefault
+                minPolarAngle={0.2}
+                maxPolarAngle={Math.PI / 2.2}
+                minDistance={6}
+                maxDistance={22}
+                enableDamping
+                dampingFactor={0.08}
+                rotateSpeed={cameraSensitivity}
+                zoomSpeed={0.8}
+                autoRotate={autoRotateCamera}
+                autoRotateSpeed={1.0}
+                target={[0, 0, 0]}
+              />
+              <CinematicCamera enableParallax={enableParallax} />
 
               {enableScreenShake && <CameraShakeManager />}
-              {quality !== 'low' && (
-                <EffectComposer multisampling={0}>
-                  {quality === 'high' && (
+              {(enableBloom || enableSSAO) && (
+                <EffectComposer multisampling={enableAA ? 4 : 0}>
+                  {enableSSAO && (
                     <SSAO
                       blendFunction={BlendFunction.MULTIPLY}
-                      samples={31}
+                      samples={shadowQuality === 'high' ? 31 : 16}
                       radius={0.2}
                       intensity={20}
                     />
                   )}
-                  {quality === 'high' ? (
+                  {enableBloom && (
                     <Bloom luminanceThreshold={0.8} mipmapBlur intensity={1.0} levels={8} opacity={1} />
-                  ) : (
-                    <Bloom luminanceThreshold={0.8} mipmapBlur intensity={0.5} levels={4} opacity={1} />
                   )}
                   <Vignette eskil={false} offset={0.1} darkness={1.0} />
-                  {quality === 'high' && <Noise premultiply blendFunction={BlendFunction.ADD} opacity={0.05} />}
+                  {enableSSAO && <Noise premultiply blendFunction={BlendFunction.ADD} opacity={0.05} />}
                   <ToneMapping />
                 </EffectComposer>
               )}

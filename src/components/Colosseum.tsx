@@ -2,14 +2,22 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { Float, Billboard, useTexture, Sparkles, Html, Cloud } from "@react-three/drei";
+import { generateNoiseTexture } from "@/lib/textures";
+import { TRAINER_SPRITES, type CharacterData } from "@/lib/store";
 
-// Trainer Sprite URLs (Local copies of Gen V Showdown/Bulbagarden sprites)
-const TRAINER_URLS = {
-    red: "/trainer_red.png", // Red 
-    blue: "/trainer_blue.png", // Blue
-};
+const COLOSSEUM_NOISE = generateNoiseTexture(256, 1.0, 0.5);
+if (COLOSSEUM_NOISE) {
+    COLOSSEUM_NOISE.repeat.set(4, 4);
+}
 
-function PlayerPodium({ position, color, textureUrl, isFlipped = false, speechBubble, pet = false }: { position: [number, number, number], color: string, textureUrl: string, isFlipped?: boolean, speechBubble?: string | null, pet?: boolean }) {
+
+// Resolve a trainer sprite ID to its actual URL
+function resolveTrainerUrl(spriteId: string): string {
+    const found = TRAINER_SPRITES.find(s => s.id === spriteId);
+    return found ? found.url : '/trainer_red.png';
+}
+
+function PlayerPodium({ position, color, textureUrl, isFlipped = false, speechBubble, companionId, trainerTitle }: { position: [number, number, number], color: string, textureUrl: string, isFlipped?: boolean, speechBubble?: string | null, companionId?: number, trainerTitle?: string }) {
     const texture = useTexture(textureUrl);
     texture.magFilter = THREE.NearestFilter;
     if (texture) {
@@ -35,13 +43,13 @@ function PlayerPodium({ position, color, textureUrl, isFlipped = false, speechBu
                 {/* Elevating Shaft */}
                 <mesh position={[0, -2, 0]} castShadow>
                     <cylinderGeometry args={[0.8, 0.8, 4, 32]} />
-                    <meshStandardMaterial color="#1a202c" roughness={0.9} />
+                    <meshStandardMaterial color="#1a202c" roughness={0.9} roughnessMap={COLOSSEUM_NOISE} bumpMap={COLOSSEUM_NOISE} bumpScale={0.005} />
                 </mesh>
 
                 {/* Platform Base Floor */}
                 <mesh position={[0, 0, 0]} receiveShadow castShadow>
                     <boxGeometry args={[4, 0.2, 4]} />
-                    <meshStandardMaterial color="#2d3748" roughness={0.8} />
+                    <meshStandardMaterial color="#2d3748" roughness={0.8} roughnessMap={COLOSSEUM_NOISE} bumpMap={COLOSSEUM_NOISE} bumpScale={0.005} />
                 </mesh>
 
                 {/* Outer Glowing Trim */}
@@ -65,17 +73,17 @@ function PlayerPodium({ position, color, textureUrl, isFlipped = false, speechBu
                 {/* Side Walls */}
                 <mesh position={[-1.9, 0.5, 0]} castShadow>
                     <boxGeometry args={[0.2, 1.2, 4]} />
-                    <meshStandardMaterial color="#2d3748" roughness={0.7} />
+                    <meshStandardMaterial color="#2d3748" roughness={0.7} roughnessMap={COLOSSEUM_NOISE} bumpMap={COLOSSEUM_NOISE} bumpScale={0.005} />
                 </mesh>
                 <mesh position={[1.9, 0.5, 0]} castShadow>
                     <boxGeometry args={[0.2, 1.2, 4]} />
-                    <meshStandardMaterial color="#2d3748" roughness={0.7} />
+                    <meshStandardMaterial color="#2d3748" roughness={0.7} roughnessMap={COLOSSEUM_NOISE} bumpMap={COLOSSEUM_NOISE} bumpScale={0.005} />
                 </mesh>
 
                 {/* Back Wall (for safety!) */}
                 <mesh position={[0, 0.5, -1.9]} castShadow>
                     <boxGeometry args={[4, 1.2, 0.2]} />
-                    <meshStandardMaterial color="#2d3748" roughness={0.7} />
+                    <meshStandardMaterial color="#2d3748" roughness={0.7} roughnessMap={COLOSSEUM_NOISE} bumpMap={COLOSSEUM_NOISE} bumpScale={0.005} />
                 </mesh>
             </group>
 
@@ -93,16 +101,25 @@ function PlayerPodium({ position, color, textureUrl, isFlipped = false, speechBu
                 </mesh>
 
                 {/* Tiny Animated Shoulder Pet */}
-                {pet && (
+                {companionId && (
                     <group ref={petRef} position={[isFlipped ? -1.2 : 1.2, 0.5, 0]}>
                         <Html transform center sprite zIndexRange={[100, 0]} scale={0.5}>
                             <img
-                                src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/384.gif"
-                                alt="Rayquaza Pet"
+                                src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${companionId}.gif`}
+                                alt="Companion"
                                 style={{ width: '128px', height: '128px', imageRendering: 'pixelated', opacity: 0.9, filter: 'drop-shadow(0 0 10px #22c55e)' }}
                             />
                         </Html>
                     </group>
+                )}
+
+                {/* Trainer Title Label */}
+                {trainerTitle && (
+                    <Html position={[0, -1.2, 0]} center zIndexRange={[100, 0]}>
+                        <div className="text-[10px] font-bold text-white/60 uppercase tracking-widest whitespace-nowrap px-2 py-0.5 bg-black/40 rounded-full pointer-events-none">
+                            {trainerTitle}
+                        </div>
+                    </Html>
                 )}
 
                 {/* Speech Bubble attached to Billboard so it faces camera */}
@@ -281,7 +298,29 @@ function CelestialRings() {
     );
 }
 
-export function Colosseum({ trashTalk }: { trashTalk?: string | null }) {
+export function Colosseum({ trashTalk, playerCharacter, opponentCharacter, playerColor }: { trashTalk?: string | null, playerCharacter?: CharacterData | null, opponentCharacter?: CharacterData | null, playerColor?: 'w' | 'b' | 's' | null }) {
+    // Determine which side is which
+    // White player sits at bottom (positive Z), Black at top (negative Z)
+    const isPlayerWhite = playerColor !== 'b';
+
+    // Player's podium data
+    const playerSprite = playerCharacter ? resolveTrainerUrl(playerCharacter.trainerSprite) : '/trainer_red.png';
+    const playerCompanion = playerCharacter?.companionPokemon;
+    const playerTitle = playerCharacter?.trainerTitle;
+
+    // Opponent's podium data
+    const opponentSprite = opponentCharacter ? resolveTrainerUrl(opponentCharacter.trainerSprite) : '/trainer_blue.png';
+    const opponentCompanion = opponentCharacter?.companionPokemon;
+    const opponentTitle = opponentCharacter?.trainerTitle;
+
+    // Assign to white/black positions for 3D scene
+    const whiteSprite = isPlayerWhite ? playerSprite : opponentSprite;
+    const whiteCompanion = isPlayerWhite ? playerCompanion : opponentCompanion;
+    const whiteTitle = isPlayerWhite ? playerTitle : opponentTitle;
+
+    const blackSprite = isPlayerWhite ? opponentSprite : playerSprite;
+    const blackCompanion = isPlayerWhite ? opponentCompanion : playerCompanion;
+    const blackTitle = isPlayerWhite ? opponentTitle : playerTitle;
     // Generate positions for the outer pillars
     const numPillars = 16;
     const arenaRadius = 14;
@@ -299,13 +338,13 @@ export function Colosseum({ trashTalk }: { trashTalk?: string | null }) {
     return (
         <group position={[0, -0.2, 0]}>
             {/* Player Podiums (Behind the board on opposite sides, resting on the lower inner ring) */}
-            <PlayerPodium position={[0, -1.0, 9]} color="#ef4444" textureUrl={TRAINER_URLS.red} isFlipped={true} />
-            <PlayerPodium position={[0, -1.0, -9]} color="#3b82f6" textureUrl={TRAINER_URLS.blue} speechBubble={trashTalk} pet={true} />
+            <PlayerPodium position={[0, -1.0, 9]} color="#ef4444" textureUrl={whiteSprite} isFlipped={true} companionId={whiteCompanion} trainerTitle={whiteTitle} />
+            <PlayerPodium position={[0, -1.0, -9]} color="#3b82f6" textureUrl={blackSprite} speechBubble={trashTalk} companionId={blackCompanion} trainerTitle={blackTitle} />
 
             {/* The Main Battle Platform (Directly under the board) */}
             <mesh position={[0, -0.5, 0]} receiveShadow>
                 <cylinderGeometry args={[6.5, 7, 1, 64]} />
-                <meshStandardMaterial color="#2d3748" roughness={0.8} />
+                <meshStandardMaterial color="#2d3748" roughness={0.8} roughnessMap={COLOSSEUM_NOISE} bumpMap={COLOSSEUM_NOISE} bumpScale={0.01} />
             </mesh>
 
             {/* Inner Ring (Moat / Lower ground) */}
@@ -330,19 +369,19 @@ export function Colosseum({ trashTalk }: { trashTalk?: string | null }) {
                     {/* Pillar Base */}
                     <mesh position={[0, -1.8, 0]} castShadow receiveShadow>
                         <boxGeometry args={[1.2, 0.5, 1.2]} />
-                        <meshStandardMaterial color="#4a5568" roughness={0.7} />
+                        <meshStandardMaterial color="#4a5568" roughness={0.7} roughnessMap={COLOSSEUM_NOISE} bumpMap={COLOSSEUM_NOISE} bumpScale={0.005} />
                     </mesh>
 
                     {/* Pillar Column */}
                     <mesh position={[0, 1, 0]} castShadow receiveShadow>
                         <cylinderGeometry args={[0.4, 0.5, 5, 16]} />
-                        <meshStandardMaterial color="#718096" roughness={0.6} />
+                        <meshStandardMaterial color="#718096" roughness={0.6} roughnessMap={COLOSSEUM_NOISE} bumpMap={COLOSSEUM_NOISE} bumpScale={0.008} />
                     </mesh>
 
                     {/* Pillar Top Cap */}
                     <mesh position={[0, 3.6, 0]} castShadow receiveShadow>
                         <boxGeometry args={[1.2, 0.3, 1.2]} />
-                        <meshStandardMaterial color="#4a5568" roughness={0.7} />
+                        <meshStandardMaterial color="#4a5568" roughness={0.7} roughnessMap={COLOSSEUM_NOISE} bumpMap={COLOSSEUM_NOISE} bumpScale={0.005} />
                     </mesh>
 
                     {/* Evolutionary Stone from PokeAPI hovering on top */}

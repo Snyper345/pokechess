@@ -9,6 +9,12 @@ import cors from "cors";
 import { getAccount, updateElo, getLeaderboard } from "./db";
 
 // Game State Management
+interface CharacterData {
+  trainerSprite: string;
+  trainerTitle: string;
+  companionPokemon: number;
+}
+
 interface GameState {
   chess: Chess;
   players: {
@@ -18,6 +24,10 @@ interface GameState {
   playerUsernames: {
     w?: string;
     b?: string;
+  };
+  playerCharacters: {
+    w?: CharacterData;
+    b?: CharacterData;
   };
   spectators: Set<WebSocket>;
 }
@@ -44,12 +54,19 @@ async function startServer() {
           const { roomId } = data;
           currentRoom = roomId;
 
+          const charData: CharacterData | undefined = data.character ? {
+            trainerSprite: data.character.trainerSprite || 'red',
+            trainerTitle: data.character.trainerTitle || 'Pokémon Trainer',
+            companionPokemon: data.character.companionPokemon || 25,
+          } : undefined;
+
           let game = games.get(roomId);
           if (!game) {
             game = {
               chess: new Chess(),
               players: {},
               playerUsernames: {},
+              playerCharacters: {},
               spectators: new Set(),
             };
             games.set(roomId, game);
@@ -59,17 +76,24 @@ async function startServer() {
           if (!game.players.w) {
             game.players.w = ws;
             game.playerUsernames.w = data.username || "Anonymous";
+            game.playerCharacters.w = charData;
             playerColor = "w";
             getAccount(game.playerUsernames.w); // Init account
           } else if (!game.players.b) {
             game.players.b = ws;
             game.playerUsernames.b = data.username || "Anonymous";
+            game.playerCharacters.b = charData;
             playerColor = "b";
             getAccount(game.playerUsernames.b); // Init account
           } else {
             game.spectators.add(ws);
             playerColor = "s";
           }
+
+          // Determine opponent character for this player
+          const opponentColor = playerColor === 'w' ? 'b' : 'w';
+          const opponentChar = game.playerCharacters[opponentColor] || null;
+          const opponentName = game.playerUsernames[opponentColor] || null;
 
           // Send initial state
           ws.send(JSON.stringify({
@@ -78,7 +102,24 @@ async function startServer() {
             color: playerColor,
             history: game.chess.history({ verbose: true }),
             turn: game.chess.turn(),
+            opponentCharacter: opponentChar,
+            opponentUsername: opponentName,
           }));
+
+          // Notify the existing player about their new opponent's character
+          if (playerColor === 'b' && game.players.w && game.players.w.readyState === WebSocket.OPEN) {
+            game.players.w.send(JSON.stringify({
+              type: "OPPONENT_CHARACTER",
+              character: charData,
+              username: data.username || "Anonymous",
+            }));
+          } else if (playerColor === 'w' && game.players.b && game.players.b.readyState === WebSocket.OPEN) {
+            game.players.b.send(JSON.stringify({
+              type: "OPPONENT_CHARACTER",
+              character: charData,
+              username: data.username || "Anonymous",
+            }));
+          }
         }
 
         if (data.type === "MOVE") {

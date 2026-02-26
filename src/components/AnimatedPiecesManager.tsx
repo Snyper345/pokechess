@@ -96,11 +96,10 @@ function CaptureVFX({ type }: { type?: string }) {
     );
 }
 
-// Single piece that smoothly lerps to its target square, handles spawns and battles
 function AnimatedPiece({ data }: { data: AnimatedPieceData }) {
     const groupRef = useRef<THREE.Group>(null!);
     const trailGroupRef = useRef<THREE.Group>(null!);
-    const { enableParticles } = useSettingsStore();
+    const { enableParticles, animationSpeed } = useSettingsStore();
 
     // Animation states
     const [spawnStartTime, setSpawnStartTime] = useState<number | null>(null);
@@ -136,13 +135,14 @@ function AnimatedPiece({ data }: { data: AnimatedPieceData }) {
         }
     }, [data.isCaptured, data.square, prevSquare, captureStartTime]);
 
-    useFrame((state, delta) => {
+    useFrame((state, baseDelta) => {
         if (!groupRef.current) return;
         const now = Date.now();
+        const delta = baseDelta * animationSpeed; // Scale delta by user setting
 
         // 1. Spawn Animation (Pokéball jump out)
-        if (spawnStartTime && now - spawnStartTime < 1000) {
-            const progress = (now - spawnStartTime) / 1000;
+        if (spawnStartTime && now - spawnStartTime < 1000 / animationSpeed) {
+            const progress = ((now - spawnStartTime) * animationSpeed) / 1000;
             // Easing functions for bounce
             const bounceY = Math.max(0, Math.sin(progress * Math.PI) * 4); // Jump arc
             const finalY = getBoardPos(data.square)[1];
@@ -159,14 +159,14 @@ function AnimatedPiece({ data }: { data: AnimatedPieceData }) {
         // 2. Capture Animation (Hit flash and shake)
         if (data.isCaptured && captureStartTime) {
             const elapsed = now - captureStartTime;
-            if (elapsed < 500) {
+            if (elapsed < 500 / animationSpeed) {
                 // Flash red and shake
-                const shakeIntensity = 0.2 * (1 - elapsed / 500);
+                const shakeIntensity = 0.2 * (1 - (elapsed * animationSpeed) / 500);
                 groupRef.current.position.x = targetPos.x + (Math.random() - 0.5) * shakeIntensity;
                 groupRef.current.position.z = targetPos.z + (Math.random() - 0.5) * shakeIntensity;
 
                 if (flashMaterialRef.current) {
-                    flashMaterialRef.current.opacity = 0.6 * (1 - elapsed / 500); // Gentle fade out
+                    flashMaterialRef.current.opacity = 0.6 * (1 - (elapsed * animationSpeed) / 500); // Gentle fade out
                 }
             } else {
                 // Fainting Animation: Sink into ground, shrink, fade out
@@ -185,7 +185,7 @@ function AnimatedPiece({ data }: { data: AnimatedPieceData }) {
 
         // If we are moving and very close to target, trigger a tiny "lunge/bump" before settling
         if (isCurrentlyMoving && dist < 0.5 && dist > 0.1) {
-            const lungeOffset = new THREE.Vector3().subVectors(targetPos, groupRef.current.position).normalize().multiplyScalar(0.2);
+            const lungeOffset = new THREE.Vector3().subVectors(targetPos, groupRef.current.position).normalize().multiplyScalar(0.2 * animationSpeed);
             groupRef.current.position.add(lungeOffset);
         }
 
@@ -264,8 +264,11 @@ export function AnimatedPiecesManager({ game }: { game: Chess }) {
         // Instead of complex tracking, we just rebuild the state:
         // Actually, chess.js history tells us exactly what moved!
         setPieces((currentPieces) => {
-            // If this is the initial load, create all 32 pieces
-            if (currentPieces.length === 0) {
+            const currentFen = game.fen();
+            const initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+            // If this is the initial load or a game reset, create all 32 pieces
+            if (currentPieces.length === 0 || currentFen === initialFen) {
                 const newPieces: AnimatedPieceData[] = [];
                 let pId = 0;
                 for (let r = 0; r < 8; r++) {
@@ -276,7 +279,7 @@ export function AnimatedPiecesManager({ game }: { game: Chess }) {
                             const rankStr = String(8 - r);
                             const square = `${fileStr}${rankStr}` as ChessSquare;
                             newPieces.push({
-                                id: `piece_${pId++}_${piece.color}_${piece.type}`,
+                                id: `piece_${Date.now()}_${pId++}_${piece.color}_${piece.type}`,
                                 type: piece.type,
                                 color: piece.color,
                                 square: square,
