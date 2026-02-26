@@ -533,7 +533,7 @@ export function ChessBoard({ className }: ChessBoardProps) {
                 minPolarAngle={0.2}
                 maxPolarAngle={Math.PI / 2.2}
                 minDistance={6}
-                maxDistance={22}
+                maxDistance={40}
                 enableDamping
                 dampingFactor={0.08}
                 rotateSpeed={cameraSensitivity}

@@ -149,6 +149,9 @@ export function SettingsPanel() {
                                     </div>
                                 </section>
 
+                                {/* JUMBOTRON SECTION */}
+                                <JumbotronSettings store={store} />
+
                             </div>
                         </motion.div>
                     </div>
@@ -176,7 +179,6 @@ function SliderItem({ label, value, onChange, min, max, step }: { label: string,
     );
 }
 
-// Reusable toggle switch component
 function ToggleItem({ label, description, checked, onChange, icon }: { label: string, description?: string, checked: boolean, onChange: () => void, icon: React.ReactNode }) {
     return (
         <div className="flex items-center justify-between group">
@@ -195,5 +197,45 @@ function ToggleItem({ label, description, checked, onChange, icon }: { label: st
                 <span className={`${checked ? 'translate-x-4' : 'translate-x-1'} inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform`} />
             </button>
         </div>
+    );
+}
+
+// Jumbotron settings with local state for video ID input
+function JumbotronSettings({ store }: { store: any }) {
+    const [localVideoId, setLocalVideoId] = useState(store.jumbotronVideoId);
+
+    const applyVideoId = () => {
+        if (localVideoId.trim()) {
+            store.setJumbotronVideoId(localVideoId.trim());
+        }
+    };
+
+    return (
+        <section className="space-y-4">
+            <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2 border-b border-neutral-800 pb-2">
+                <MonitorPlay size={14} /> Jumbotron
+            </h3>
+            <div className="space-y-2">
+                <label className="text-neutral-300 text-sm font-medium">YouTube Video ID</label>
+                <div className="flex gap-2">
+                    <input
+                        type="text"
+                        value={localVideoId}
+                        onChange={(e) => setLocalVideoId(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && applyVideoId()}
+                        placeholder="e.g. rg6CiPI6h2g"
+                        className="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/30 transition-colors"
+                    />
+                    <button
+                        onClick={applyVideoId}
+                        className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold rounded-lg transition-colors shrink-0"
+                    >
+                        Apply
+                    </button>
+                </div>
+                <p className="text-neutral-500 text-xs">Paste a YouTube video ID and click Apply to change the jumbotron video</p>
+            </div>
+            <SliderItem label={`Jumbotron Volume (${Math.round(store.jumbotronVolume * 100)}%)`} value={store.jumbotronVolume} onChange={store.setJumbotronVolume} min={0} max={1} step={0.05} />
+        </section>
     );
 }

@@ -31,6 +31,10 @@ interface SettingsState {
     highlightColor: string;
     enableHints: boolean;
 
+    // Jumbotron
+    jumbotronVideoId: string;
+    jumbotronVolume: number;
+
     // Actions
     setVolume: (v: number) => void;
     setMusicVolume: (v: number) => void;
@@ -55,6 +59,9 @@ interface SettingsState {
     toggleShowCoordinates: () => void;
     setHighlightColor: (c: string) => void;
     toggleHints: () => void;
+
+    setJumbotronVideoId: (id: string) => void;
+    setJumbotronVolume: (v: number) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -84,6 +91,9 @@ export const useSettingsStore = create<SettingsState>()(
             highlightColor: '#fbbf24',
             enableHints: false,
 
+            jumbotronVideoId: 'rg6CiPI6h2g',
+            jumbotronVolume: 0.3,
+
             setVolume: (v) => set({ volume: v }),
             setMusicVolume: (v) => set({ musicVolume: v }),
             setSfxVolume: (v) => set({ sfxVolume: v }),
@@ -107,6 +117,9 @@ export const useSettingsStore = create<SettingsState>()(
             toggleShowCoordinates: () => set((state) => ({ showCoordinates: !state.showCoordinates })),
             setHighlightColor: (c) => set({ highlightColor: c }),
             toggleHints: () => set((state) => ({ enableHints: !state.enableHints })),
+
+            setJumbotronVideoId: (id) => set({ jumbotronVideoId: id }),
+            setJumbotronVolume: (v) => set({ jumbotronVolume: v }),
         }),
         {
             name: 'pokechess-settings',

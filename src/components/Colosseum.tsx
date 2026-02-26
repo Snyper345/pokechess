@@ -1,9 +1,9 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useEffect, useCallback } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import { Float, Billboard, useTexture, Sparkles, Html, Cloud } from "@react-three/drei";
 import { generateNoiseTexture } from "@/lib/textures";
-import { TRAINER_SPRITES, type CharacterData } from "@/lib/store";
+import { TRAINER_SPRITES, type CharacterData, useSettingsStore } from "@/lib/store";
 
 const COLOSSEUM_NOISE = generateNoiseTexture(256, 1.0, 0.5);
 if (COLOSSEUM_NOISE) {
@@ -243,7 +243,7 @@ function PillarStone({ type, position }: { type: string, position: [number, numb
                         />
                     </mesh>
                 </Billboard>
-                <pointLight color="#ffffff" intensity={10} distance={5} />
+                <pointLight color="#ffffff" intensity={30} distance={8} decay={2} />
             </group>
         </Float>
     );
@@ -297,6 +297,224 @@ function CelestialRings() {
         </group>
     );
 }
+
+function Jumbotron({ isPlayerWhite = true }: { isPlayerWhite?: boolean }) {
+    const { jumbotronVideoId, jumbotronVolume } = useSettingsStore();
+    const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+    const screenW = 9;
+    const screenH = 5;
+    const embedUrl = `https://www.youtube.com/embed/${jumbotronVideoId}?autoplay=1&mute=1&loop=1&playlist=${jumbotronVideoId}&controls=0&showinfo=0&modestbranding=1&rel=0&enablejsapi=1&origin=${window.location.origin}`;
+    const chainLength = 30;
+
+    // Send volume commands to YouTube iframe via postMessage
+    const sendCommand = useCallback((func: string, args?: any[]) => {
+        const iframe = iframeRef.current;
+        if (!iframe?.contentWindow) return;
+        iframe.contentWindow.postMessage(JSON.stringify({
+            event: 'command',
+            func,
+            args: args || [],
+        }), '*');
+    }, []);
+
+    // Update volume when slider changes
+    useEffect(() => {
+        const vol = Math.round(jumbotronVolume * 100);
+        // Small delay to ensure iframe API is ready
+        const timer = setTimeout(() => {
+            sendCommand('setVolume', [vol]);
+            if (vol === 0) {
+                sendCommand('mute');
+            } else {
+                sendCommand('unMute');
+            }
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [jumbotronVolume, sendCommand]);
+
+    // Also set volume when iframe first loads
+    const handleIframeLoad = useCallback(() => {
+        setTimeout(() => {
+            const vol = Math.round(jumbotronVolume * 100);
+            sendCommand('setVolume', [vol]);
+            if (vol === 0) {
+                sendCommand('mute');
+            } else {
+                sendCommand('unMute');
+            }
+        }, 1000); // Wait for YT API to initialize
+    }, [jumbotronVolume, sendCommand]);
+
+    // Slide-down animation
+    const groupRef = useRef<THREE.Group>(null);
+    const targetY = 12;
+    const zPos = isPlayerWhite ? -14 : 14;
+    const screenRotation = isPlayerWhite ? 0 : Math.PI; // Flip screen to face player
+    const startY = useRef(60); // Start high up in the sky
+    const currentY = useRef(startY.current);
+
+    useFrame(() => {
+        if (!groupRef.current) return;
+        // Ease toward target position
+        currentY.current += (targetY - currentY.current) * 0.015;
+        groupRef.current.position.y = currentY.current;
+    });
+
+    return (
+        <group ref={groupRef} position={[0, 60, zPos]} rotation={[0, screenRotation, 0]}>
+            {/* === HEAVENLY CHAINS (4 golden chains vanishing upward) === */}
+            {[
+                [-(screenW / 2 + 0.2), 0.4],
+                [screenW / 2 + 0.2, 0.4],
+                [-(screenW / 2 + 0.2), -0.4],
+                [screenW / 2 + 0.2, -0.4],
+            ].map(([x, z], i) => (
+                <group key={i}>
+                    <mesh position={[x, screenH / 2 + chainLength / 2 + 1, z]} castShadow>
+                        <cylinderGeometry args={[0.05, 0.05, chainLength, 8]} />
+                        <meshStandardMaterial color="#b8860b" metalness={0.95} roughness={0.15} emissive="#8b6914" emissiveIntensity={0.1} />
+                    </mesh>
+                    {[4, 10, 18, 26].map((offset, j) => (
+                        <mesh key={j} position={[x, screenH / 2 + offset + 1, z]}>
+                            <torusGeometry args={[0.12, 0.03, 8, 16]} />
+                            <meshStandardMaterial color="#fbbf24" emissive="#b45309" emissiveIntensity={0.5} metalness={0.9} roughness={0.2} />
+                        </mesh>
+                    ))}
+                </group>
+            ))}
+
+            {/* === ORNAMENTAL CROWN (top mounting piece) === */}
+            <group position={[0, screenH / 2 + 1.2, 0]}>
+                <mesh castShadow>
+                    <boxGeometry args={[screenW + 1.5, 0.4, 2]} />
+                    <meshStandardMaterial color="#1e293b" metalness={0.95} roughness={0.15} />
+                </mesh>
+                <mesh position={[0, 0.15, 0]}>
+                    <boxGeometry args={[screenW + 1.8, 0.1, 2.2]} />
+                    <meshStandardMaterial color="#fbbf24" emissive="#b45309" emissiveIntensity={0.5} metalness={0.9} roughness={0.2} />
+                </mesh>
+                <mesh position={[0, 0.6, 0]}>
+                    <sphereGeometry args={[0.4, 32, 32]} />
+                    <meshStandardMaterial color="#ef4444" emissive="#dc2626" emissiveIntensity={0.6} metalness={0.4} roughness={0.3} />
+                </mesh>
+                <mesh position={[0, 0.6, 0]}>
+                    <torusGeometry args={[0.42, 0.04, 16, 32]} />
+                    <meshStandardMaterial color="#fbbf24" emissive="#b45309" emissiveIntensity={0.8} metalness={0.9} roughness={0.2} />
+                </mesh>
+                <pointLight position={[0, 0.6, 0]} color="#ef4444" intensity={15} distance={5} decay={2} />
+            </group>
+
+            {/* === MAIN FRAME (thick ornate border) === */}
+            <mesh position={[0, screenH / 2 + 0.35, 0]} castShadow>
+                <boxGeometry args={[screenW + 1.2, 0.7, 0.3]} />
+                <meshStandardMaterial color="#0f172a" metalness={0.95} roughness={0.15} />
+            </mesh>
+            <mesh position={[0, -(screenH / 2 + 0.35), 0]} castShadow>
+                <boxGeometry args={[screenW + 1.2, 0.7, 0.3]} />
+                <meshStandardMaterial color="#0f172a" metalness={0.95} roughness={0.15} />
+            </mesh>
+            <mesh position={[-(screenW / 2 + 0.35), 0, 0]} castShadow>
+                <boxGeometry args={[0.7, screenH + 1.4, 0.3]} />
+                <meshStandardMaterial color="#0f172a" metalness={0.95} roughness={0.15} />
+            </mesh>
+            <mesh position={[screenW / 2 + 0.35, 0, 0]} castShadow>
+                <boxGeometry args={[0.7, screenH + 1.4, 0.3]} />
+                <meshStandardMaterial color="#0f172a" metalness={0.95} roughness={0.15} />
+            </mesh>
+
+            {/* === GOLD INNER TRIM === */}
+            <mesh position={[0, screenH / 2, 0.55]}>
+                <boxGeometry args={[screenW + 0.2, 0.1, 0.1]} />
+                <meshStandardMaterial color="#fbbf24" emissive="#b45309" emissiveIntensity={0.7} metalness={0.9} roughness={0.2} />
+            </mesh>
+            <mesh position={[0, -(screenH / 2), 0.55]}>
+                <boxGeometry args={[screenW + 0.2, 0.1, 0.1]} />
+                <meshStandardMaterial color="#fbbf24" emissive="#b45309" emissiveIntensity={0.7} metalness={0.9} roughness={0.2} />
+            </mesh>
+            <mesh position={[-(screenW / 2), 0, 0.55]}>
+                <boxGeometry args={[0.1, screenH + 0.2, 0.1]} />
+                <meshStandardMaterial color="#fbbf24" emissive="#b45309" emissiveIntensity={0.7} metalness={0.9} roughness={0.2} />
+            </mesh>
+            <mesh position={[screenW / 2, 0, 0.55]}>
+                <boxGeometry args={[0.1, screenH + 0.2, 0.1]} />
+                <meshStandardMaterial color="#fbbf24" emissive="#b45309" emissiveIntensity={0.7} metalness={0.9} roughness={0.2} />
+            </mesh>
+
+            {/* === CORNER ORBS === */}
+            {[
+                [-(screenW / 2 + 0.35), screenH / 2 + 0.35],
+                [screenW / 2 + 0.35, screenH / 2 + 0.35],
+                [-(screenW / 2 + 0.35), -(screenH / 2 + 0.35)],
+                [screenW / 2 + 0.35, -(screenH / 2 + 0.35)],
+            ].map(([x, y], i) => (
+                <group key={i} position={[x, y, 0.55]}>
+                    <mesh>
+                        <sphereGeometry args={[0.2, 16, 16]} />
+                        <meshStandardMaterial color="#38bdf8" emissive="#0ea5e9" emissiveIntensity={2} metalness={0.3} roughness={0.2} />
+                    </mesh>
+                    <pointLight color="#38bdf8" intensity={15} distance={4} decay={2} />
+                </group>
+            ))}
+
+            {/* === BACKING PANEL === */}
+            <mesh position={[0, 0, 0]}>
+                <boxGeometry args={[screenW + 0.2, screenH + 0.2, 0.1]} />
+                <meshStandardMaterial color="#050a15" roughness={0.95} metalness={0.1} />
+            </mesh>
+
+            {/* === SCREEN GLOW === */}
+            <mesh position={[0, 0, 0.42]}>
+                <planeGeometry args={[screenW, screenH]} />
+                <meshStandardMaterial color="#0ea5e9" emissive="#0284c7" emissiveIntensity={0.12} metalness={0.1} roughness={0.5} />
+            </mesh>
+
+            {/* === VIDEO SCREEN (single iframe with volume control) === */}
+            <Html key={`screen-${jumbotronVideoId}`} transform position={[0, 0, 0.5]} scale={0.72} zIndexRange={[100, 0]}>
+                <div style={{
+                    width: '500px',
+                    height: '280px',
+                    background: '#000',
+                    overflow: 'hidden',
+                    borderRadius: '4px',
+                    boxShadow: '0 0 60px rgba(14, 165, 233, 0.4), inset 0 0 20px rgba(14, 165, 233, 0.1)',
+                    pointerEvents: 'auto',
+                }}>
+                    <iframe
+                        ref={iframeRef}
+                        width="500"
+                        height="280"
+                        src={embedUrl}
+                        title="Jumbotron"
+                        frameBorder="0"
+                        allow="autoplay; encrypted-media"
+                        allowFullScreen
+                        onLoad={handleIframeLoad}
+                        style={{ width: '100%', height: '100%', border: 'none', pointerEvents: 'none' }}
+                    />
+                </div>
+            </Html>
+
+            {/* === BOTTOM PENDANT === */}
+            <group position={[0, -(screenH / 2 + 1.2), 0]}>
+                <mesh castShadow>
+                    <cylinderGeometry args={[0.3, 0.05, 1.0, 8]} />
+                    <meshStandardMaterial color="#1e293b" metalness={0.9} roughness={0.2} />
+                </mesh>
+                <mesh position={[0, -0.6, 0]}>
+                    <sphereGeometry args={[0.15, 16, 16]} />
+                    <meshStandardMaterial color="#fbbf24" emissive="#b45309" emissiveIntensity={1} metalness={0.8} roughness={0.2} />
+                </mesh>
+                <pointLight position={[0, -0.6, 0]} color="#fbbf24" intensity={10} distance={4} decay={2} />
+            </group>
+
+            {/* === LIGHTING === */}
+            <pointLight position={[0, -(screenH / 2 + 2), 0]} color="#e0f2fe" intensity={120} distance={20} decay={2} />
+            <pointLight position={[0, 0, 3]} color="#0ea5e9" intensity={25} distance={10} decay={2} />
+        </group>
+    );
+}
+
 
 export function Colosseum({ trashTalk, playerCharacter, opponentCharacter, playerColor }: { trashTalk?: string | null, playerCharacter?: CharacterData | null, opponentCharacter?: CharacterData | null, playerColor?: 'w' | 'b' | 's' | null }) {
     // Determine which side is which
@@ -356,6 +574,9 @@ export function Colosseum({ trashTalk, playerCharacter, opponentCharacter, playe
 
             {/* Epic Rotating Celestial Rings spanning the map */}
             <CelestialRings />
+
+            {/* Floating Jumbotron above the board */}
+            <Jumbotron isPlayerWhite={isPlayerWhite} />
 
             {/* Stadium Floor / Outer Boundary */}
             <mesh position={[0, -2, 0]} receiveShadow>
